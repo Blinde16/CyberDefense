@@ -1,0 +1,46 @@
+# Run as Administrator
+
+# Change the password for 'vagrant' and 'Administrator'
+$NewPassword = ConvertTo-SecureString "StrongPassword123!" -AsPlainText -Force
+Set-LocalUser -Name "vagrant" -Password $NewPassword
+Set-LocalUser -Name "Administrator" -Password $NewPassword
+
+# Disable unnecessary accounts (if any exist)
+Disable-LocalUser -Name "Guest"
+
+# Disable SSH if installed
+Get-Service -Name "sshd" -ErrorAction SilentlyContinue | Stop-Service -Force
+Get-Service -Name "sshd" -ErrorAction SilentlyContinue | Set-Service -StartupType Disabled
+
+# Disable Remote Desktop Protocol (RDP)
+Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 1
+
+# Disable SMBv1 (protects against WannaCry and other exploits)
+Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name "SMB1" -Value 0
+Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name "SMB2" -Value 0
+
+# Disable unused services
+$ServicesToDisable = @("RemoteRegistry", "Telnet", "Messenger", "Fax", "XblGameSave", "WMPNetworkSvc")
+foreach ($service in $ServicesToDisable) {
+    Get-Service -Name $service -ErrorAction SilentlyContinue | Stop-Service -Force
+    Get-Service -Name $service -ErrorAction SilentlyContinue | Set-Service -StartupType Disabled
+}
+
+# Configure Firewall - Block all incoming except webserver (port 80)
+New-NetFirewallRule -DisplayName "Allow HTTP" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow
+New-NetFirewallRule -DisplayName "Block All Unwanted" -Direction Inbound -Action Block
+
+# Enable security auditing (Log failed login attempts)
+auditpol /set /category:"Account Logon" /success:enable /failure:enable
+auditpol /set /category:"Logon/Logoff" /success:enable /failure:enable
+auditpol /set /category:"Policy Change" /success:enable /failure:enable
+
+# Check for open ports
+netstat -an | Select-String "LISTENING"
+
+# Enable Windows Defender (if installed)
+Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction SilentlyContinue
+Update-MpSignature -ErrorAction SilentlyContinue
+
+Write-Output "Security Hardening Completed!"
+
