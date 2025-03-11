@@ -1,47 +1,35 @@
 # Run as Administrator
 
 # Change the password for 'vagrant' and 'Administrator'
-$NewPassword = ConvertTo-SecureString "StrongPassword123!" -AsPlainText -Force
-Set-LocalUser -Name "vagrant" -Password $NewPassword
-Set-LocalUser -Name "Administrator" -Password $NewPassword
+$NewPassword = "StrongPassword123!"
+net user vagrant $NewPassword
+net user Administrator $NewPassword
 
-# Disable unnecessary accounts (if any exist)
-Disable-LocalUser -Name "Guest"
-
-# Disable SSH if installed
-Get-Service -Name "sshd" -ErrorAction SilentlyContinue | Stop-Service -Force
-Get-Service -Name "sshd" -ErrorAction SilentlyContinue | Set-Service -StartupType Disabled
-
-# Disable Remote Desktop Protocol (RDP)
-Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 1
-
-# Disable SMBv1 (protects against WannaCry and other exploits)
-Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name "SMB1" -Value 0
-Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name "SMB2" -Value 0
-
-# Disable unused services (excluding FTP and WAMP-related services)
-$ServicesToDisable = @("RemoteRegistry", "Telnet", "Messenger", "Fax", "XblGameSave", "WMPNetworkSvc")
-foreach ($service in $ServicesToDisable) {
-    Get-Service -Name $service -ErrorAction SilentlyContinue | Stop-Service -Force
-    Get-Service -Name $service -ErrorAction SilentlyContinue | Set-Service -StartupType Disabled
-}
+# Disable the Guest account
+net user Guest /active:no
 
 # Ensure necessary services are running
-$ServicesToEnable = @("ftpsvc", "wampapache", "wampmysqld") # Adjust based on your WAMP setup
+$ServicesToEnable = @("wampapache", "wampmysqld", "ftpsvc", "elasticsearch") # Modify based on your setup
 foreach ($service in $ServicesToEnable) {
-    Get-Service -Name $service -ErrorAction SilentlyContinue | Set-Service -StartupType Automatic
-    Get-Service -Name $service -ErrorAction SilentlyContinue | Start-Service
+    sc config $service start= auto
+    net start $service
 }
 
-# Configure Firewall - Allow necessary traffic
-New-NetFirewallRule -DisplayName "Allow HTTP" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow
-New-NetFirewallRule -DisplayName "Allow HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow
-New-NetFirewallRule -DisplayName "Allow FTP" -Direction Inbound -Protocol TCP -LocalPort 21 -Action Allow
-New-NetFirewallRule -DisplayName "Allow Passive FTP Range" -Direction Inbound -Protocol TCP -LocalPort 50000-51000 -Action Allow
-New-NetFirewallRule -DisplayName "Allow ICMP (Ping)" -Direction Inbound -Protocol ICMPv4 -Action Allow
-New-NetFirewallRule -DisplayName "Allow WAMP Apache" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
-New-NetFirewallRule -DisplayName "Allow WAMP MySQL" -Direction Inbound -Protocol TCP -LocalPort 3306 -Action Allow
-New-NetFirewallRule -DisplayName "Block All Unwanted" -Direction Inbound -Action Block
+# Disable Remote Desktop Protocol (RDP)
+reg add "HKLM\SYSTEM\CurrentControlSet\Control\Terminal Server" /v fDenyTSConnections /t REG_DWORD /d 1 /f
+
+# Disable SMBv1 (to prevent exploits like WannaCry)
+reg add "HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" /v SMB1 /t REG_DWORD /d 0 /f
+reg add "HKLM\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" /v SMB2 /t REG_DWORD /d 1 /f
+
+# Configure Windows Firewall - Allow only required services
+netsh advfirewall firewall add rule name="Allow HTTP (Web)" dir=in action=allow protocol=TCP localport=80
+netsh advfirewall firewall add rule name="Allow FTP" dir=in action=allow protocol=TCP localport=20,21
+netsh advfirewall firewall add rule name="Allow SSH" dir=in action=allow protocol=TCP localport=22
+netsh advfirewall firewall add rule name="Allow Samba (SMB)" dir=in action=allow protocol=TCP localport=445
+netsh advfirewall firewall add rule name="Allow WAMP (Apache)" dir=in action=allow protocol=TCP localport=8585
+netsh advfirewall firewall add rule name="Allow ElasticSearch" dir=in action=allow protocol=TCP localport=9200
+netsh advfirewall firewall add rule name="Block All Unwanted Traffic" dir=in action=block
 
 # Enable security auditing (Log failed login attempts)
 auditpol /set /category:"Account Logon" /success:enable /failure:enable
@@ -49,10 +37,6 @@ auditpol /set /category:"Logon/Logoff" /success:enable /failure:enable
 auditpol /set /category:"Policy Change" /success:enable /failure:enable
 
 # Check for open ports
-netstat -an | Select-String "LISTENING"
-
-# Enable Windows Defender (if installed)
-Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction SilentlyContinue
-Update-MpSignature -ErrorAction SilentlyContinue
+netstat -an | findstr LISTENING
 
 Write-Output "Security Hardening Completed! Required services are running."
