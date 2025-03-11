@@ -19,15 +19,28 @@ Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' 
 Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name "SMB1" -Value 0
 Set-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Services\LanmanServer\Parameters" -Name "SMB2" -Value 0
 
-# Disable unused services
+# Disable unused services (excluding FTP and WAMP-related services)
 $ServicesToDisable = @("RemoteRegistry", "Telnet", "Messenger", "Fax", "XblGameSave", "WMPNetworkSvc")
 foreach ($service in $ServicesToDisable) {
     Get-Service -Name $service -ErrorAction SilentlyContinue | Stop-Service -Force
     Get-Service -Name $service -ErrorAction SilentlyContinue | Set-Service -StartupType Disabled
 }
 
-# Configure Firewall - Block all incoming except webserver (port 80)
+# Ensure necessary services are running
+$ServicesToEnable = @("ftpsvc", "wampapache", "wampmysqld") # Adjust based on your WAMP setup
+foreach ($service in $ServicesToEnable) {
+    Get-Service -Name $service -ErrorAction SilentlyContinue | Set-Service -StartupType Automatic
+    Get-Service -Name $service -ErrorAction SilentlyContinue | Start-Service
+}
+
+# Configure Firewall - Allow necessary traffic
 New-NetFirewallRule -DisplayName "Allow HTTP" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow
+New-NetFirewallRule -DisplayName "Allow HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow
+New-NetFirewallRule -DisplayName "Allow FTP" -Direction Inbound -Protocol TCP -LocalPort 21 -Action Allow
+New-NetFirewallRule -DisplayName "Allow Passive FTP Range" -Direction Inbound -Protocol TCP -LocalPort 50000-51000 -Action Allow
+New-NetFirewallRule -DisplayName "Allow ICMP (Ping)" -Direction Inbound -Protocol ICMPv4 -Action Allow
+New-NetFirewallRule -DisplayName "Allow WAMP Apache" -Direction Inbound -Protocol TCP -LocalPort 8080 -Action Allow
+New-NetFirewallRule -DisplayName "Allow WAMP MySQL" -Direction Inbound -Protocol TCP -LocalPort 3306 -Action Allow
 New-NetFirewallRule -DisplayName "Block All Unwanted" -Direction Inbound -Action Block
 
 # Enable security auditing (Log failed login attempts)
@@ -42,5 +55,4 @@ netstat -an | Select-String "LISTENING"
 Set-MpPreference -DisableRealtimeMonitoring $false -ErrorAction SilentlyContinue
 Update-MpSignature -ErrorAction SilentlyContinue
 
-Write-Output "Security Hardening Completed!"
-
+Write-Output "Security Hardening Completed! Required services are running."
